@@ -56,7 +56,7 @@ static void sd_command(void){
  case 55:break;
  case 41:if(sdhc&&(!(arg&0x40000000)||!cmd8_seen)){fprintf(stderr,"SDHC missing HCS/CMD8\n");resp_count=0;break;}response[0]=63;response[1]=sdhc?192:128;break;
  case 2:response[0]=63;resp_count=136;break;
- case 3:response[1]=0x12;response[2]=0x34;response[3]=4;break;   /* R6: state ident (2), as gbareader checks */
+ case 3:response[1]=0x12;response[2]=0x34;response[3]=4;break;   /* R6 state: ident (2), as a real card */
  case 9:
   memset(response,0,sizeof(response));response[0]=63;resp_count=136;
   if(getenv("SD_BAD_CSD")){response[1]=128;break;}
@@ -119,7 +119,7 @@ static uint32_t sd_load16(struct ARMCore*c,uint32_t a,int*cycles){
 }
 static void sd_store16(struct ARMCore*c,uint32_t a,int16_t val,int*cycles){
  if(a==0x09000000&&sdimage&&write_active){if(cycles)*cycles+=5;if(!val){if(write_count)exit(47);write_count=1;}return;}
- if(a==0x09fffffe){if(cycles)*cycles+=5;unsigned v=(uint16_t)val;if(mode_step<2){if(v!=0xa55a)exit(34);mode_step++;}else{if(v>7)exit(35);sd_mode=v;if(++mode_step==4)mode_step=0;}return;}
+ if(a==0x09fffffe){if(cycles)*cycles+=5;unsigned v=(uint16_t)val;if(getenv("SD_TRACE"))fprintf(stderr,"MODE %04x\n",v);if(mode_step<2){if(v!=0xa55a)exit(34);mode_step++;}else{if(v>7)exit(35);sd_mode=v;if(++mode_step==4)mode_step=0;}return;}
  if(a==0x09440000){if(cycles)*cycles+=5;return;}
  if(a==0x09800000&&sdimage){if(cycles)*cycles+=5;if((sd_mode&3)!=3)exit(36);cmd_shift=(cmd_shift<<1)|((val>>7)&1);if(++cmd_bits==48){cmd_bits=0;sd_command();}return;}
  /* SDRAM writes on (mode bit 2): this store would change the ROM image. */
