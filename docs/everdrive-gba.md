@@ -1,8 +1,8 @@
-# EverDrive GBA support (test build)
+# EverDrive GBA driver
 
-The same document is in gbareader, gbawriter, gbavocab and gbamp3: the four
-apps share one EverDrive driver (and one Omega driver, see
-[ezflash-omega.md](ezflash-omega.md)).
+Used by gbareader, gbawriter, gbavocab and gbamp3 ("the apps" below), which
+share this driver through gbaSD.
+See also [ezflash-omega.md](ezflash-omega.md).
 
 ## Status
 
@@ -50,14 +50,14 @@ apps share one EverDrive driver (and one Omega driver, see
 
 ## How it was tested (emulator, not hardware)
 
-- `tests/emu/edgba_model.h` (gbamp3: `tests/edgba_model.h`): a register-level
+- `tests/models/edgba_model.h`: a register-level
   EverDrive model for the exact-ROM mGBA runners. The SD command and data
   lines are modeled bit by bit; every command CRC and the CRC of every
   written block on each of the four data lines is checked. It can have an
   SDHC, SDSC or v1 card, no card, a write-protected card, and slow or failing
   reads. A configuration write that would unmap the game ROM or turn on ROM
   writes stops the run.
-- gbareader: `tests/emu/edgba_test.py` (book import and reading in all those
+- gbareader (its repository): `tests/emu/edgba_test.py` (book import and reading in all those
   variants, no card, write-protected card, L+R).
 - gbawriter and gbavocab: `tests/emu/ezfo_test.py` runs one script on the
   SuperCard model, the Omega model and the EverDrive model; every screen and

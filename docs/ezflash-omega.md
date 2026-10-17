@@ -1,7 +1,7 @@
-# EZ-Flash Omega support (test build)
+# EZ-Flash Omega driver
 
-The same document is in gbareader, gbawriter, gbavocab and gbamp3: the four
-apps share one Omega driver.
+Used by gbareader, gbawriter, gbavocab and gbamp3 ("the apps" below), which
+share this driver through gbaSD.
 
 ## Status
 
@@ -52,12 +52,12 @@ apps share one Omega driver.
 
 ## How it was tested (emulator, not hardware)
 
-- `tests/emu/ezfo_model.h` (gbamp3: `tests/ezfo_model.h`): a register-level
+- `tests/models/ezfo_model.h`: a register-level
   Omega model for the exact-ROM mGBA runners. While the kernel is mapped, any
   instruction fetch or data read from the game ROM stops the run. It can
   fail reads and writes, slow the card down, report other NOR IDs, have no
   card, refuse all writes, and apply the kernel's in-game IRQ patch.
-- gbareader: `tests/emu/ezfo_test.py` (book import and reading in all those
+- gbareader (its repository): `tests/emu/ezfo_test.py` (book import and reading in all those
   variants; the SuperCard screenshots are unchanged).
 - gbawriter and gbavocab: `tests/emu/ezfo_test.py` runs one script on the
   SuperCard model and on the Omega model; every screen and every file on the
