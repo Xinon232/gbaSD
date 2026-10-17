@@ -5,9 +5,9 @@ ROM for all of them:
 
 | Cart | Status |
 |---|---|
-| SuperCard SD and derivatives | Working (in use with the released apps) |
-| EZ-Flash Omega | Working (tester report) |
-| EZ-Flash Omega Definitive Edition | Expected to work, not tested |
+| SuperCard SD and derivatives | Working |
+| EZ-Flash Omega | Working |
+| EZ-Flash Omega Definitive Edition | Working |
 | EverDrive GBA Mini | Expected to work, emulator-tested only |
 | EverDrive GBA X5 / X3 | Expected to work, not tested |
 
