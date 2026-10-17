@@ -1,6 +1,6 @@
 # gbaSD
 
-SD card access for Game Boy Advance homebrew on three flashcarts, with one
+SD card access for Game Boy Advance homebrew on three branches of flashcarts, with one
 ROM for all of them:
 
 | Cart | Status |
