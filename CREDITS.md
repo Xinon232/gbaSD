@@ -1,7 +1,7 @@
 # Credits
 
-- **SuperCard SD driver** (`src/supercard_driver.c`, `src/supercard_io.S`,
-  `src/supercard_write.S`, `src/crc.c`, `include/supercard_driver.h`,
+- **SuperCard SD driver** (`src/supercard_driver.c`, `src/supercard_io.s`,
+  `src/supercard_write.s`, `src/crc.c`, `include/supercard_driver.h`,
   `include/crc.h`): from SuperFW by David Guillen Fandos, Copyright (C)
   2024-2025, GPL-3.0-or-later. Changed by Halim Jarrar for gbareader and
   gbamp3 (single-block reads, stop after a failed read, strict write status,

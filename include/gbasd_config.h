@@ -40,7 +40,7 @@
 #define GBASD_SC_CRC16_FN
 #endif
 
-/* Assembly placement (supercard_io.S / supercard_write.S):
+/* Assembly placement (supercard_io.s / supercard_write.s):
  *   GBASD_SC_CMD_IN_IWRAM   command routines in IWRAM (default: ROM, Thumb)
  *   GBASD_SC_WRITE_IN_EWRAM sector writer in EWRAM (default: IWRAM) */
 

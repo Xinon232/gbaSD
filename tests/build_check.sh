@@ -11,8 +11,11 @@ COMMON="-mcpu=arm7tdmi -mthumb-interwork -std=gnu11 -Wall -Wextra -Werror -ffunc
 
 build() {
   name=$1; shift
-  for f in src/*.c src/*.S; do
+  for f in src/*.c; do
     "$CC" $COMMON "$@" -c "$f" -o "$OUT/$name-$(basename "$f").o"
+  done
+  for f in src/*.s; do   # assembly with C preprocessor directives
+    "$CC" $COMMON "$@" -x assembler-with-cpp -c "$f" -o "$OUT/$name-$(basename "$f").o"
   done
   echo "gbaSD $name configuration: $(ls "$OUT" | grep -c "^$name-") objects OK"
 }
