@@ -15,11 +15,6 @@ The cart is detected once at start-up (EverDrive, then Omega, then
 SuperCard). Holding **L+R** while the app starts skips the EverDrive and
 Omega checks and uses the SuperCard driver.
 
-Used by [gbareader](https://github.com/Xinon232/gbareader),
-[gbawriter](https://github.com/Xinon232/gbawriter),
-[gbavocab](https://github.com/Xinon232/gbavocab) and
-[gbamp3](https://github.com/Xinon232/gbamp3).
-
 ## Contents
 
 | Path | What |
