@@ -16,3 +16,9 @@ jobs:
         env:
           DEVKITARM: /opt/devkitpro/devkitARM
         run: sh tests/build_check.sh
+  host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: SuperCard driver host tests (default and gbamp3 configuration)
+        run: sh tests/host/run.sh

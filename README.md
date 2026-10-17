@@ -32,6 +32,7 @@ Used by [gbareader](https://github.com/Xinon232/gbareader),
 | `tests/models/` | Register-level models of the three carts for exact-ROM tests on mGBA |
 | `tests/check_ram_code.py` | Checks a linked ELF: code that runs while the Omega kernel is mapped must not reach the game ROM |
 | `tests/build_check.sh` | Compiles the library in the default and the gbamp3 configuration |
+| `tests/host/` | Host tests of the SuperCard driver against a scripted card |
 | `docs/` | How each driver works, its limits and a hardware test checklist |
 
 ## Using it
@@ -73,6 +74,10 @@ retry, and puts the code in its own overlay sections; see
 
 - `tests/build_check.sh`: compiles every file in both configurations with
   `-Wall -Wextra -Werror` (needs devkitARM). Runs in CI.
+- `tests/host/run.sh`: the SuperCard driver's C code on the host against a
+  scripted card (init, CSD and capacity, SDSC/SDHC addressing, every failing
+  response, stop after a failed read, write status, retries and limits), in
+  both configurations, with AddressSanitizer. Runs in CI.
 - The apps run their exact ROMs on mGBA against `tests/models/*.h`: book
   import, editing, saving and music playback on each cart model, with failing,
   slow, write-protected and missing cards. The models are stricter than the
