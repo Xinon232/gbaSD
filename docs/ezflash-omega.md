@@ -5,15 +5,14 @@ share this driver through gbaSD.
 
 ## Status
 
-- **Test build, not yet tried on a real EZ-Flash Omega.** Everything below
-  was checked on an emulator with a model of the Omega (see *How it was
-  tested*). Back up the SD card before trying it, and keep the SuperCard
-  release for daily use until the hardware checklist below is done.
+- **Reported working on a real EZ-Flash Omega** by a tester, and checked
+  on an emulator with a model of the Omega (see *How it was tested*). More
+  hardware reports are welcome (checklist below).
 - **EZ-Flash Omega:** the target. **Omega Definitive Edition (DE):** expected
   to work (its kernel uses the same SD routines and pages), not tested.
 - **Start the ROM from the SD card (PSRAM).** Writing it to the Omega's NOR
   flash is not supported: the app then stops on a red screen at start.
-- The SuperCard keeps working as before: one ROM for both carts.
+- One ROM for all supported carts.
 
 ## How it works
 

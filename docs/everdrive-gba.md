@@ -6,9 +6,10 @@ See also [ezflash-omega.md](ezflash-omega.md).
 
 ## Status
 
-- **Test build, not yet tried on a real EverDrive.** Everything below was
-  checked on an emulator with a model of the EverDrive (see *How it was
-  tested*). Back up the SD card before trying it.
+- **Not yet confirmed on a real EverDrive.** Everything below was checked
+  on an emulator with a model of the EverDrive (see *How it was tested*).
+  Back up the SD card before trying it, and please report results
+  (checklist below).
 - **EverDrive GBA Mini:** the target (krikzz's published SD code for it is
   the base). **EverDrive GBA X5 and X3:** expected to work, not tested
   (krikzz's published code is for the Mini; the X series is believed to use
