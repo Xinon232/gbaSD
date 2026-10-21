@@ -28,6 +28,8 @@ Omega checks and uses the SuperCard driver.
 | `tests/check_ram_code.py` | Checks a linked ELF: code that runs while the Omega kernel is mapped must not reach the game ROM |
 | `tests/build_check.sh` | Compiles the library in the default and the gbamp3 configuration |
 | `tests/host/` | Host tests of the SuperCard driver against a scripted card |
+| `tests/emu/` | Exact-ROM tests of the SuperCard read CRC check on mGBA |
+| `tools/crc_diag/` | SuperCard read CRC diagnostics ROM for real carts |
 | `docs/` | How each driver works, its limits and a hardware test checklist |
 
 ## Using it
@@ -44,6 +46,18 @@ if (cart_sd_init() == 0) {              /* detects the cart, starts the card */
 }
 ```
 
+### SuperCard: read CRC16 check
+
+The SuperCard driver checks the CRC16 the card sends with every sector it
+reads (computed inside the read loop, about +1100 CPU cycles per 512-byte
+sector, +25%). A sector whose CRC does not match is read again up to twice;
+if it still fails, the read fails (`SD_ERR_BADREAD`) instead of returning
+wrong data. A safety switch turns the check off for the session if it fails
+from the start (CRC bytes not where the driver expects them on that cart):
+the data is then returned as before. `sdcard_crc_stats()` gives the counts.
+Details, costs and limits: [docs/supercard-sd.md](docs/supercard-sd.md).
+On a real SuperCard, `tools/crc_diag` checks it.
+
 `cart_kind` tells which cart was found (`CART_SUPERCARD`, `CART_EZFO`,
 `CART_EDGBA`, or one of the `*_NO_CARD` values). A FatFs `diskio.c` only
 needs to forward to `cart_read` / `cart_write`.
@@ -54,6 +68,13 @@ Defaults suit apps that may wait for a slow card. See `gbasd_config.h`:
 
 - `GBASD_SC_IDLE_TIMEOUT`, `GBASD_SC_DATA_TIMEOUT`: SuperCard waits
 - `GBASD_SC_WRITE_RETRIES` (default 2), `GBASD_SC_MAX_WRITE_BLOCKS` (default no limit)
+- `GBASD_SC_READ_CRC` (2 check and retry, 1 count only, 0 off),
+  `GBASD_SC_READ_UNROLL` (read loop unroll, default 4; IWRAM size),
+  `GBASD_SC_READ_RETRIES` (2), `GBASD_SC_CRC_TRUST` (64),
+  `GBASD_SC_CRC_SUSPECTS` (3): the read CRC check. Butano apps that change
+  the first two set them in `USERASFLAGS` as well as `USERFLAGS` (Butano
+  passes no C flags to assembly; a mismatch in `GBASD_SC_READ_CRC` does not
+  link).
 - `GBASD_SC_FAST_FN`, `GBASD_SC_CRC7_FN`, `GBASD_SC_CRC16_FN`,
   `GBASD_SC_CMD_IN_IWRAM`, `GBASD_SC_WRITE_IN_EWRAM`: where the SuperCard code lives
 - `EZFO_SECTION`, `EZFO_ISA`, `EZFO_OUTER_SECTION`, `EZFO_PROBE_SECTION`,
@@ -62,8 +83,10 @@ Defaults suit apps that may wait for a slow card. See `gbasd_config.h`:
   run from RAM; `tests/check_ram_code.py` proves it.
 
 gbamp3 (a music player with full IWRAM) uses short timeouts, no write
-retry, and puts the code in its own overlay sections; see
-`tests/build_check.sh` for the exact flags.
+retry, the read loop unrolled twice (`-DGBASD_SC_READ_UNROLL=2`: the
+SuperCard code then takes 48 bytes less IWRAM than before the CRC check;
+the default 4 would take about 130 more), and puts the code in its own overlay
+sections; see `tests/build_check.sh` for the exact flags.
 
 ## Testing
 
@@ -71,13 +94,21 @@ retry, and puts the code in its own overlay sections; see
   `-Wall -Wextra -Werror` (needs devkitARM). Runs in CI.
 - `tests/host/run.sh`: the SuperCard driver's C code on the host against a
   scripted card (init, CSD and capacity, SDSC/SDHC addressing, every failing
-  response, stop after a failed read, write status, retries and limits), in
-  both configurations, with AddressSanitizer. Runs in CI.
+  response, stop after a failed read, write status, retries and limits; the
+  read CRC16 against a reference with every bit flip, retry, read error and
+  safety switch), in both configurations and all CRC modes, with
+  AddressSanitizer. Runs in CI.
+- `tests/emu/crc_diag_test.py`: the diagnostics ROMs (`tools/crc_diag`) on
+  mGBA against the SuperCard model with injected CRC faults: flipped bits
+  (once, for good, before the check is trusted), a wrong CRC, the old
+  constant CRC (safety switch). Needs libmgba, mtools, dosfstools.
 - The apps run their exact ROMs on mGBA against `tests/models/*.h`: book
   import, editing, saving and music playback on each cart model, with failing,
   slow, write-protected and missing cards. The models are stricter than the
   hardware (the Omega model stops the run if the game ROM is read while the
-  kernel is mapped; the EverDrive model checks every command and data CRC).
+  kernel is mapped; the EverDrive model checks every command and data CRC;
+  the SuperCard model sends the correct read CRC and can inject CRC faults,
+  see `tests/models/scsd_model.h`).
   They are models, not hardware proof: please report results on real carts.
 
 ## Licence
