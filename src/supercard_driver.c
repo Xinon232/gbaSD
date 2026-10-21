@@ -53,17 +53,29 @@ static inline bool use_fast_mirror() {
   #endif
 }
 
-typedef int (*t_rdsec_fn)(uint8_t *buffer, unsigned count, unsigned timeout);
+// gbaSD: the read routines return 0 (done), 1 (data timeout) or, in CRC
+// check mode, the buffer address after a sector whose CRC did not match
+// (that sector read in full, the transfer still open).
+typedef uintptr_t (*t_rdsec_fn)(uint8_t *buffer, unsigned count, unsigned timeout);
 typedef int (*t_wrsec_fn)(const uint8_t *buffer, unsigned count, unsigned timeout);
 
-int sc_read_sectors_w0(uint8_t *buffer, unsigned count, unsigned timeout);
-int sc_read_sectors_w1(uint8_t *buffer, unsigned count, unsigned timeout);
+// The read routines by their names with the CRC mode in them (supercard_io.s):
+// C and assembly built with different GBASD_SC_READ_CRC do not link.
+#define SC_RD_CAT2(a, b, c) a ## b ## c
+#define SC_RD_CAT(a, b, c) SC_RD_CAT2(a, b, c)
+#define SC_RD_MODE_SYM(w) SC_RD_CAT(sc_read_sectors_crc, GBASD_SC_READ_CRC, _ ## w)
+
+uintptr_t SC_RD_MODE_SYM(w0)(uint8_t *buffer, unsigned count, unsigned timeout);
+uintptr_t SC_RD_MODE_SYM(w1)(uint8_t *buffer, unsigned count, unsigned timeout);
 int sc_write_sectors_w0(const uint8_t *buffer, unsigned count, unsigned timeout);
 int sc_write_sectors_w1(const uint8_t *buffer, unsigned count, unsigned timeout);
 
 static const t_rdsec_fn sc_read_sectors[2] = {
-  &sc_read_sectors_w0, &sc_read_sectors_w1
+  &SC_RD_MODE_SYM(w0), &SC_RD_MODE_SYM(w1)
 };
+
+// Read CRC counters (supercard_io.s count mode adds to .mismatches).
+t_sc_crc_stats gbasd_sc_crc_stats = { .mode = GBASD_SC_READ_CRC };
 
 static const t_wrsec_fn sc_write_sectors[2] = {
   &sc_write_sectors_w0, &sc_write_sectors_w1
@@ -224,6 +236,7 @@ static bool send_sdcard_reset() {
 unsigned sdcard_init(t_card_info *info) {
   uint8_t resp[SD_MAX_RESP_BUF];
   drv_issdhc = false; drv_rca = 0;
+  gbasd_sc_crc_stats = (t_sc_crc_stats){ .mode = GBASD_SC_READ_CRC };   // a new session
   bool ready = false;
 
   // Wait for card to be internally initialized. As per spec:
@@ -341,6 +354,9 @@ unsigned sdcard_init(t_card_info *info) {
 
 #endif
 
+static bool sdcard_read_stop(bool single);
+static unsigned sdcard_read_recover(uint8_t *buffer, uint32_t blocknum, unsigned blkcnt, uintptr_t ret);
+
 GBASD_SC_FAST_FN
 unsigned sdcard_read_blocks(uint8_t *buffer, uint32_t blocknum, unsigned blkcnt) {
   uint8_t resp[6];
@@ -348,13 +364,110 @@ unsigned sdcard_read_blocks(uint8_t *buffer, uint32_t blocknum, unsigned blkcnt)
     return SD_ERR_BADREAD;
 
   // Read all data using the asm routine for speed.
-  bool failed = sc_read_sectors[SC_FAST_ROM_MIRROR ? 1 : 0](buffer, blkcnt, WAIT_DATA_TIMEOUT) != 0;
+  uintptr_t ret = sc_read_sectors[SC_FAST_ROM_MIRROR ? 1 : 0](buffer, blkcnt, WAIT_DATA_TIMEOUT);
+  if (ret)    /* data timeout or CRC mismatch: the rest in ROM code */
+    return sdcard_read_recover(buffer, blocknum, blkcnt, ret);
+#if GBASD_SC_READ_CRC
+  gbasd_sc_crc_stats.sectors += blkcnt;
+#endif
+  return sdcard_read_stop(blkcnt == 1) ? 0 : SD_ERR_BADREAD;
+}
 
-  if (blkcnt == 1) send_empty_clocks(8);
+static bool sdcard_crc_trusted(void) {
+  t_sc_crc_stats *st = &gbasd_sc_crc_stats;
+  if (!st->trusted && st->sectors - st->mismatches >= GBASD_SC_CRC_TRUST)
+    st->trusted = 1;
+  return st->trusted;
+}
+
+// Ends a transfer: 8 clocks after CMD17, CMD12 after CMD18. In ROM (no
+// GBASD_SC_FAST_FN): the command itself takes far longer than the call.
+static __attribute__((noinline)) bool sdcard_read_stop(bool single) {
+  if (single) {
+    send_empty_clocks(8);
+    return true;
+  }
+  return send_sdcard_command(SD_CMD12, 0, NULL, SD_MAX_RESP);
+}
+
+// The read routine did not finish: ret 1 is a data timeout (read error);
+// ret > 1 (check mode) is a CRC mismatch, ret the buffer address after the
+// failing sector. The transfer (blkcnt sectors from blocknum into buffer) is
+// still open. Each failing sector is read again up to GBASD_SC_READ_RETRIES times (stop,
+// then a new read from that sector on); the sectors before it are kept.
+// Still failing: a read error once the CRC layout is trusted, before that the
+// sector is kept as read (the safety switch, see gbasd_config.h). Rare, so
+// in ROM (no GBASD_SC_FAST_FN).
+static __attribute__((noinline))
+unsigned sdcard_read_recover(uint8_t *buffer, uint32_t blocknum, unsigned blkcnt, uintptr_t ret) {
+  t_sc_crc_stats *st = &gbasd_sc_crc_stats;
+  bool single = blkcnt == 1;   // the open transfer is a CMD17
+  uint32_t bad_lba = 0xFFFFFFFF;
+  unsigned tries = 0;
+  uint8_t resp[6];
+
+  while (GBASD_SC_READ_CRC >= 2 && ret > 1) {
+    unsigned done = ((uint8_t *)ret - buffer) / 512;   // read, the last one bad
+    uint32_t lba = blocknum + done - 1;
+    st->sectors += done;
+    st->mismatches++;
+    if (lba != bad_lba) {
+      bad_lba = lba;
+      tries = 0;
+    }
+
+    bool keep = st->disabled;
+    if (!keep && tries >= GBASD_SC_READ_RETRIES) {
+      if (sdcard_crc_trusted()) {
+        st->failures++;
+        sdcard_read_stop(single);
+        return SD_ERR_BADREAD;
+      }
+      keep = true;                 // not trusted yet: as without the check
+      if (++st->suspects >= GBASD_SC_CRC_SUSPECTS)
+        st->disabled = 1;
+    }
+
+    if (keep) {
+      // Keep the sector as read; the same transfer goes on.
+      buffer += done * 512;
+      blocknum += done;
+      blkcnt -= done;
+      if (!blkcnt) {
+        ret = 0;
+        break;
+      }
+      ret = sc_read_sectors[SC_FAST_ROM_MIRROR ? 1 : 0](buffer, blkcnt, WAIT_DATA_TIMEOUT);
+      continue;
+    }
+
+    // Stop, then read again from the failing sector on.
+    tries++;
+    st->retries++;
+    if (!sdcard_read_stop(single))
+      return SD_ERR_BADREAD;
+    buffer += (done - 1) * 512;
+    blkcnt -= done - 1;
+    blocknum = lba;
+    single = blkcnt == 1;
+    if (!send_sdcard_command_noclock(single ? SD_CMD17 : SD_CMD18, sc_issdhc() ? blocknum : blocknum * 512, resp, sizeof(resp)))
+      return SD_ERR_BADREAD;
+    ret = sc_read_sectors[SC_FAST_ROM_MIRROR ? 1 : 0](buffer, blkcnt, WAIT_DATA_TIMEOUT);
+  }
+
+#if GBASD_SC_READ_CRC
+  if (!ret)
+    st->sectors += blkcnt;
+#endif
   /* CMD18 must be stopped even after a data timeout. */
-  if (blkcnt != 1 && !send_sdcard_command(SD_CMD12, 0, NULL, SD_MAX_RESP))
-    return SD_ERR_BADREAD;
-  return failed ? SD_ERR_BADREAD : 0;
+  bool stopped = sdcard_read_stop(single);
+  return (ret || !stopped) ? SD_ERR_BADREAD : 0;
+}
+
+const t_sc_crc_stats *sdcard_crc_stats(void) {
+  if (GBASD_SC_READ_CRC >= 2)
+    sdcard_crc_trusted();
+  return &gbasd_sc_crc_stats;
 }
 
 // Multi-block write (CMD25). Success only when the card took every block,

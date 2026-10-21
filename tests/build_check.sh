@@ -1,6 +1,7 @@
 #!/bin/sh
 # Compiles gbaSD in the default configuration (gbareader, gbawriter, gbavocab:
-# Thumb, ROM) and in gbamp3's (ARM, IWRAM/EWRAM sections, short timeouts).
+# Thumb, ROM), in the read CRC16 variants and in gbamp3's (ARM, IWRAM/EWRAM
+# sections, short timeouts, read loop unrolled twice).
 # Needs devkitARM (DEVKITARM or arm-none-eabi-gcc on PATH).
 set -eu
 cd "$(dirname "$0")/.."
@@ -21,7 +22,11 @@ build() {
 }
 
 build default -mthumb -O2
-build gbamp3 -marm -O3 -mlong-calls \
+# Read CRC16 modes (count only, off) and loop unroll counts.
+build crc-count -mthumb -O2 -DGBASD_SC_READ_CRC=1
+build crc-off -mthumb -O2 -DGBASD_SC_READ_CRC=0
+for u in 1 2 8 16 32; do build unroll$u -mthumb -O2 -DGBASD_SC_READ_UNROLL=$u; done
+build gbamp3 -marm -O3 -mlong-calls -DGBASD_SC_READ_UNROLL=2 \
   -DGBASD_SC_IDLE_TIMEOUT=0x8000 -DGBASD_SC_DATA_TIMEOUT=0x4000 \
   -DGBASD_SC_WRITE_RETRIES=0 -DGBASD_SC_MAX_WRITE_BLOCKS=16 \
   '-DGBASD_SC_FAST_FN=__attribute__((section(".iwram"),noinline,noclone))' \

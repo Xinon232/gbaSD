@@ -46,6 +46,23 @@ uint16_t sc_rca();
 unsigned sdcard_read_blocks(uint8_t *buffer, uint32_t blocknum, unsigned blkcnt);
 unsigned sdcard_write_blocks(const uint8_t *buffer, uint32_t blocknum, unsigned blkcnt);
 
+// gbaSD: read CRC16 check counters (GBASD_SC_READ_CRC), since sdcard_init().
+// Diagnostics only; the driver keeps them up to date.
+typedef struct {
+  uint32_t sectors;      // sectors read with the check on (each attempt)
+  uint32_t mismatches;   // of these: CRC did not match (supercard_io.s
+                         // count mode adds to this word: keep it second)
+  uint32_t retries;      // re-reads after a mismatch (check mode)
+  uint32_t failures;     // reads failed after all retries (SD_ERR_BADREAD)
+  uint32_t suspects;     // mismatching sectors returned as read before the
+                         // CRC layout was trusted (safety switch)
+  uint8_t mode;          // GBASD_SC_READ_CRC: 0 off, 1 count only, 2 check
+  uint8_t trusted;       // GBASD_SC_CRC_TRUST sectors matched
+  uint8_t disabled;      // safety switch: check off until the next init
+} t_sc_crc_stats;
+
+const t_sc_crc_stats *sdcard_crc_stats(void);
+
 #define SD_ERR_NO_STARTUP       1
 #define SD_ERR_BAD_IDENT        2
 #define SD_ERR_BAD_INIT         3

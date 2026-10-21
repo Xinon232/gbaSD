@@ -1,6 +1,7 @@
 #!/bin/sh
 # Host tests of the SuperCard driver C code (bus routines replaced by a
-# scripted card), in the default and in gbamp3's configuration.
+# scripted card), in the default and in gbamp3's configuration, and the
+# read CRC16 (reference, retry, safety switch) in all three CRC modes.
 # The inline-asm mode switch is cut from a temporary copy of the driver.
 set -eu
 cd "$(dirname "$0")/../.."
@@ -20,10 +21,18 @@ for cfg in default gbamp3; do
   else
     D=""
   fi
-  for t in init write; do
+  for t in init write crc; do
     $CC -std=c11 -O1 -g $SAN -fwrapv -DSDDRV_TIMEOUT_MULT=4096 $D -Iinclude \
       "$OUT/supercard_host.c" src/crc.c "tests/host/test_supercard_$t.c" -o "$OUT/$t-$cfg"
     printf '%s: ' "$cfg"; "$OUT/$t-$cfg"
+  done
+done
+# Read CRC count-only and off builds (GBASD_SC_READ_CRC 1 and 0).
+for m in 1 0; do
+  for t in init crc; do
+    $CC -std=c11 -O1 -g $SAN -fwrapv -DSDDRV_TIMEOUT_MULT=4096 -DGBASD_SC_READ_CRC=$m -Iinclude \
+      "$OUT/supercard_host.c" src/crc.c "tests/host/test_supercard_$t.c" -o "$OUT/$t-crc$m"
+    printf 'GBASD_SC_READ_CRC=%s: ' "$m"; "$OUT/$t-crc$m"
   done
 done
 echo "gbaSD host tests PASS"

@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include "supercard_driver.h"
 #include "gbasd_config.h"
+#define SC_RD_CAT2(a,b,c) a##b##c
+#define SC_RD_CAT(a,b,c) SC_RD_CAT2(a,b,c)
+#define SC_RD_MODE_SYM(w) SC_RD_CAT(sc_read_sectors_crc,GBASD_SC_READ_CRC,_##w)
 bool isgba=true,slowsd=false;
 static unsigned cmd,arg,failcmd,busy,writefail,stops,writes;
 void send_empty_clocks(unsigned n){assert(n);}
@@ -13,8 +16,8 @@ bool wait_sdcard_idle(unsigned n){return n!=0;}
 bool wait_dat0_idle(unsigned n){assert(n);return !busy;}
 void send_sdcard_commandbuf(const uint8_t*p,unsigned n){assert(n==6);cmd=p[0]&63;arg=(unsigned)p[1]<<24|(unsigned)p[2]<<16|p[3]<<8|p[4];if(cmd==12)stops++;}
 bool receive_sdcard_response(uint8_t*p,unsigned n,unsigned t){assert(t);if(cmd==failcmd)return false;if(p){memset(p,0,n);p[0]=cmd;if(cmd==13){p[3]=9;p[4]=0;}}return true;}
-int sc_read_sectors_w0(uint8_t*b,unsigned n,unsigned t){(void)b;(void)n;(void)t;return 1;}
-int sc_read_sectors_w1(uint8_t*b,unsigned n,unsigned t){return sc_read_sectors_w0(b,n,t);}
+uintptr_t SC_RD_MODE_SYM(w0)(uint8_t*b,unsigned n,unsigned t){(void)b;(void)n;(void)t;return 1;}
+uintptr_t SC_RD_MODE_SYM(w1)(uint8_t*b,unsigned n,unsigned t){return SC_RD_MODE_SYM(w0)(b,n,t);}
 int sc_write_sectors_w0(const uint8_t*b,unsigned n,unsigned t){assert(b&&n&&t&&arg==123*512);writes++;return writefail;}
 int sc_write_sectors_w1(const uint8_t*b,unsigned n,unsigned t){return sc_write_sectors_w0(b,n,t);}
 int main(void){
