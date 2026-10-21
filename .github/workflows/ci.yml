@@ -16,6 +16,8 @@ jobs:
         env:
           DEVKITARM: /opt/devkitpro/devkitARM
         run: sh tests/build_check.sh
+      - name: Build the SuperCard read CRC diagnostics ROMs
+        run: make -C tools/crc_diag
   host:
     runs-on: ubuntu-24.04
     steps:
