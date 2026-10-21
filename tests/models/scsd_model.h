@@ -5,6 +5,16 @@
  * Actual ROM executes driver, FatFS, decoder and IRQ. No seeded guest buffers.
  * Serial CMD, 4-bit data latch including LDM bus reads. Explicit synthetic
  * costs: 5 cycles/halfword CMD/poll, 8 cycles/word data; not hardware proof.
+ * Read data ends with its correct CRC16 (four lines, as a card sends it), in
+ * the latch like data bytes. Fault injection (sector reads count from 1):
+ *   SD_CRC_FLIP=N      the Nth sector read has one data bit flipped on the bus
+ *                      (the card image is unchanged; the CRC is of the image)
+ *   SD_CRC_FLIP_LBA=L  the same for the first read of sector L
+ *   SD_CRC_BAD=N       the Nth sector read has a wrong CRC (data correct)
+ *   SD_CRC_STICKY=1    the sector hit by one of these stays bad on every read
+ *   SD_CRC_FLIP_BIT=B  data bit B (0-4095, bit B%8 of byte B/8; default 802)
+ *   SD_CRC_CONST=1     every CRC is 0xa5 bytes (the model's old constant)
+ * scsd_report() prints the counts.
  */
 #include <mgba/internal/arm/arm.h>
 #include <string.h>
@@ -15,19 +25,26 @@ static unsigned char *sdimage;static FILE *image_file;static uint64_t image_size
 static unsigned cmd_bits,resp_bit,resp_count,sd_reads,sd_writes,sd_mode,mode_step,read_calls,delay_polls,configured_delay,fail_read;
 static unsigned sdhc,read_active,cmd8_seen,high_reads,max_lba,read_cmds,stop_cmds,multi_cmds;
 static uint64_t cmd_shift;static unsigned char response[20],sector_data[512];
+static unsigned char bus_data[520];static unsigned crc_flip_read,crc_bad_read,crc_sticky,crc_const,crc_flip_bit=802,crc_faults;
+static uint64_t crc_flip_lba=~0ull,crc_sticky_lba=~0ull;static unsigned crc_sticky_kind;
 static unsigned write_active,write_count,write_response,write_status,fail_write;
 static uint64_t write_offset;
 static unsigned char write_data[520];
-static void finish_write(void){
+/* CRC16 of the four data lines, packed as the card sends it (8 bytes). */
+static void sd_crc16(const unsigned char*d,unsigned char*out){
  unsigned crc[4]={0};
  for(unsigned i=0;i<512;i++)for(int shift=4;shift>=0;shift-=4)for(unsigned lane=0;lane<4;lane++){
-  unsigned bit=((write_data[i]>>(shift+lane))&1)^((crc[lane]>>15)&1);
+  unsigned bit=((d[i]>>(shift+lane))&1)^((crc[lane]>>15)&1);
   crc[lane]=((crc[lane]<<1)&65535)^(bit?0x1021:0);
  }
  for(unsigned i=0;i<8;i++){
   unsigned v=0;for(unsigned half=0;half<2;half++)for(unsigned lane=0;lane<4;lane++)v|=((crc[lane]>>(15-i*2-half))&1)<<(4*(1-half)+lane);
-  if(write_data[512+i]!=v){fprintf(stderr,"BAD DATA CRC\n");exit(43);}
+  out[i]=v;
  }
+}
+static void finish_write(void){
+ unsigned char crc[8];sd_crc16(write_data,crc);
+ if(memcmp(write_data+512,crc,8)){fprintf(stderr,"BAD DATA CRC\n");exit(43);}
  sd_writes++;write_status=sd_writes==fail_write?11:5;write_response=0;
  if(write_status==5){
   if(write_offset>image_size||image_size-write_offset<512)exit(44);
@@ -41,6 +58,17 @@ static void start_sector(void){
  unsigned lba=read_offset/512;if(lba>max_lba)max_lba=lba;if(lba>=0x400000)high_reads++;
  if(read_offset>image_size||image_size-read_offset<512||sd_reads==fail_read){delay_polls=0xffffffff;return;}
  if(fseeko(image_file,(off_t)read_offset,SEEK_SET)||fread(sector_data,1,512,image_file)!=512)exit(38);
+ /* What the card sends: data, then its CRC16; faults only on the bus. */
+ memcpy(bus_data,sector_data,512);sd_crc16(sector_data,bus_data+512);
+ if(crc_const)memset(bus_data+512,0xa5,8);
+ unsigned kind=0;   /* 1: data bit flipped, 2: CRC wrong */
+ if(sd_reads==crc_flip_read||lba==crc_flip_lba){kind=1;crc_flip_lba=~0ull;}
+ if(sd_reads==crc_bad_read)kind=2;
+ if(kind&&crc_sticky){crc_sticky_lba=lba;crc_sticky_kind=kind;}
+ if(lba==crc_sticky_lba)kind=crc_sticky_kind;
+ if(kind==1)bus_data[crc_flip_bit/8]^=1u<<(crc_flip_bit%8);
+ if(kind==2)bus_data[512+3]^=0x40;
+ if(kind){crc_faults++;if(getenv("SD_TRACE"))fprintf(stderr,"CRC FAULT %u lba=%u read=%u\n",kind,lba,sd_reads);}
  io_start=mTimingGlobalTime(model_core->timing);io_sample_start=model_stats?model_core->busRead32(model_core,model_stats+32):0;
  if(model_core->busRead16(model_core,0x04000208))io_audio_reads++;
 }
@@ -93,11 +121,10 @@ static uint32_t sd_load32(struct ARMCore*c,uint32_t a,int*cycles){
   if(cycles)*cycles+=8;
   if(!read_active||delay_polls)exit(41);
   unsigned i=read_calls++;
-  if(i<512){/* each word clocks four nibbles: only odd latch is stable */
+  if(i<520){/* each word clocks four nibbles: only odd latch is stable; 512 data words, then 8 CRC words */
    unsigned off=(i/2)*2;
-   return i&1?((unsigned)sector_data[off]|((unsigned)sector_data[off+1]<<8))<<16:(unsigned)sector_data[off]<<24;
+   return i&1?((unsigned)bus_data[off]|((unsigned)bus_data[off+1]<<8))<<16:(unsigned)bus_data[off]<<24;
   }
-  /* Upstream consumes but does not validate CRC16. Deliberately nonzero. */
   return 0xa5a5a5a5;
  }
  return original_memory.load32(c,a,cycles);
@@ -131,5 +158,9 @@ static void model_install(struct mCore*c){
  const char*p=getenv("SD_IMAGE");if(p&&*p){image_file=fopen(p,getenv("SD_ALLOW_INDEX_WRITES")?"r+b":"rb");if(!image_file)exit(37);fseeko(image_file,0,SEEK_END);image_size=ftello(image_file);rewind(image_file);sdimage=malloc(1);}
  const char*d=getenv("SD_DELAY_POLLS");configured_delay=d?strtoul(d,0,0):0;d=getenv("SD_FAIL_READ");fail_read=d?strtoul(d,0,0):0;
  d=getenv("SD_FAIL_WRITE");fail_write=d?strtoul(d,0,0):0;
+ d=getenv("SD_CRC_FLIP");crc_flip_read=d?strtoul(d,0,0):0;d=getenv("SD_CRC_BAD");crc_bad_read=d?strtoul(d,0,0):0;
+ d=getenv("SD_CRC_FLIP_LBA");if(d&&*d)crc_flip_lba=strtoull(d,0,0);d=getenv("SD_CRC_FLIP_BIT");if(d&&*d)crc_flip_bit=strtoul(d,0,0)%4096;
+ crc_sticky=getenv("SD_CRC_STICKY")!=NULL;crc_const=getenv("SD_CRC_CONST")!=NULL;
  struct ARMCore*cpu=c->cpu;original_memory=cpu->memory;cpu->memory.store32=sd_store32;cpu->memory.load32=sd_load32;cpu->memory.load16=sd_load16;cpu->memory.store16=sd_store16;cpu->memory.loadMultiple=sd_load_multiple;
 }
+static __attribute__((unused)) void scsd_report(FILE*f){fprintf(f,"SCSD sectors_read=%u sectors_written=%u read_cmds=%u stop_cmds=%u crc_faults=%u\n",sd_reads,sd_writes,read_cmds,stop_cmds,crc_faults);}
