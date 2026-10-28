@@ -65,6 +65,20 @@ gbamp3 (a music player with full IWRAM) uses short timeouts, no write
 retry, and puts the code in its own overlay sections; see
 `tests/build_check.sh` for the exact flags.
 
+## FatFs
+
+`fatfs/` holds the FatFs R0.15 the apps share (ChaN's FatFs with the apps'
+exFAT power-cut fixes and a fix for FAT folder growth), the Butano apps'
+`diskio.c`, and `exfat_repair`, which repairs exFAT entry sets a power cut
+left half written. gbamp3's faster exFAT lookup, 32-bit file sizes and
+open-by-entry functions are switches in the app's `ffconf.h`, off by
+default. A Butano app adds `gbasd/fatfs` to `SOURCES` and `INCLUDES` and
+keeps its own `include/ffconf.h`. See `docs/fatfs.md`.
+
+`tests/fatfs/run.sh` runs the FatFs power-cut tests (FAT12, FAT16, FAT32
+and exFAT) in both switch configurations, in CI. `tests/exfat_kit/` lets
+an app's card tests run on exFAT cards (see its README).
+
 ## Testing
 
 - `tests/build_check.sh`: compiles every file in both configurations with

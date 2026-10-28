@@ -22,3 +22,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: SuperCard driver host tests (default and gbamp3 configuration)
         run: sh tests/host/run.sh
+  fatfs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install exfatprogs, dosfstools, mtools
+        run: sudo apt-get update && sudo apt-get install -y exfatprogs dosfstools mtools
+      - name: FatFs tests (exfat_repair, folder-growth power cuts, exFAT kit; both switch configurations)
+        run: sh tests/fatfs/run.sh
