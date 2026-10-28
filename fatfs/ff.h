@@ -45,6 +45,9 @@ extern "C" {
 #ifndef GBASD_FF_OPEN_ENTRY
 #define GBASD_FF_OPEN_ENTRY	0	/* 1: f_open_entry / f_opendir_entry (FILINFO gets fstat, fclust) */
 #endif
+#ifndef GBASD_FF_FAT_STRETCH_FIX
+#define GBASD_FF_FAT_STRETCH_FIX	1	/* 0 only in tests: FAT folder growth links the new cluster before clearing it (R0.15) */
+#endif
 
 
 /* Integer types used for FatFs API */

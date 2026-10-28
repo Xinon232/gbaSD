@@ -321,5 +321,8 @@
 /  without a second path lookup (read-only file); FILINFO gains fstat and
 /  fclust, and on exFAT fsize also holds a folder's size. */
 
+/* GBASD_FF_FAT_STRETCH_FIX (default 1) is for tests only: 0 brings back
+/  R0.15's FAT folder growth (new cluster linked before it is cleared). */
+
 
 /*--- End of configuration options ---*/

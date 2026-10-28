@@ -1531,10 +1531,23 @@ static FRESULT remove_chain (	/* FR_OK(0):succeeded, !=0:error */
 /* FAT handling - Stretch a chain or Create a new chain                  */
 /*-----------------------------------------------------------------------*/
 
+#if GBASD_FF_FAT_STRETCH_FIX
+/* gbaSD: create_chain(obj, clst) is create_chain_ex(obj, clst, 1). With link 0
+   on a FAT12/16/32 volume the new cluster is taken (marked EOC) but clst is
+   not linked to it yet: dir_next first clears it on the card, then links it.
+   The cluster chosen is the same either way. exFAT ignores link. */
+#define create_chain(obj, clst) create_chain_ex(obj, clst, 1)
+static DWORD create_chain_ex (	/* 0:No free cluster, 1:Internal error, 0xFFFFFFFF:Disk error, >=2:New cluster# */
+	FFOBJID* obj,		/* Corresponding object */
+	DWORD clst,			/* Cluster# to stretch, 0:Create a new chain */
+	int link			/* gbaSD: 0: FAT: do not link clst to the new cluster (the caller does) */
+)
+#else
 static DWORD create_chain (	/* 0:No free cluster, 1:Internal error, 0xFFFFFFFF:Disk error, >=2:New cluster# */
 	FFOBJID* obj,		/* Corresponding object */
 	DWORD clst			/* Cluster# to stretch, 0:Create a new chain */
 )
+#endif
 {
 	DWORD cs, ncl, scl;
 	FRESULT res;
@@ -1611,7 +1624,11 @@ static DWORD create_chain (	/* 0:No free cluster, 1:Internal error, 0xFFFFFFFF:D
 			}
 		}
 		res = put_fat(fs, ncl, 0xFFFFFFFF);		/* Mark the new cluster 'EOC' */
+#if GBASD_FF_FAT_STRETCH_FIX
+		if (res == FR_OK && clst != 0 && link) {
+#else
 		if (res == FR_OK && clst != 0) {
+#endif
 			res = put_fat(fs, clst, ncl);		/* Link it from the previous one if needed */
 		}
 	}
@@ -1794,11 +1811,25 @@ static FRESULT dir_next (	/* FR_OK(0):succeeded, FR_NO_FILE:End of table, FR_DEN
 					if (!stretch) {								/* If no stretch, report EOT */
 						dp->sect = 0; return FR_NO_FILE;
 					}
+#if GBASD_FF_FAT_STRETCH_FIX
+					/* gbaSD: FAT12/16/32: the new cluster is cleared on the card before the FAT links the */
+					/* folder to it. R0.15 linked it first: the FAT sector with the link was written when */
+					/* dir_clear flushed the window, so a power cut before the zeros were all written left */
+					/* the folder ending in a cluster of old data, read as garbage entries. Now a cut leaves */
+					/* the folder as it was, plus at most one lost cluster (marked EOC, linked from nothing). */
+					clst = create_chain_ex(&dp->obj, dp->clust, FF_FS_EXFAT && fs->fs_type == FS_EXFAT);	/* Allocate a cluster (FAT: not linked yet) */
+					if (clst == 0) return FR_DENIED;			/* No free cluster */
+					if (clst == 1) return FR_INT_ERR;			/* Internal error */
+					if (clst == 0xFFFFFFFF) return FR_DISK_ERR;	/* Disk error */
+					if (dir_clear(fs, clst) != FR_OK) return FR_DISK_ERR;	/* Clean up the stretched table */
+					if ((!FF_FS_EXFAT || fs->fs_type != FS_EXFAT) && put_fat(fs, dp->clust, clst) != FR_OK) return FR_DISK_ERR;	/* gbaSD: FAT: now link it */
+#else
 					clst = create_chain(&dp->obj, dp->clust);	/* Allocate a cluster */
 					if (clst == 0) return FR_DENIED;			/* No free cluster */
 					if (clst == 1) return FR_INT_ERR;			/* Internal error */
 					if (clst == 0xFFFFFFFF) return FR_DISK_ERR;	/* Disk error */
 					if (dir_clear(fs, clst) != FR_OK) return FR_DISK_ERR;	/* Clean up the stretched table */
+#endif
 					if (FF_FS_EXFAT) dp->obj.stat |= 4;			/* exFAT: The directory has been stretched */
 #else
 					if (!stretch) dp->sect = 0;					/* (this line is to suppress compiler warning) */
