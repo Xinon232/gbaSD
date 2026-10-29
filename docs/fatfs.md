@@ -201,3 +201,7 @@ FatFs is by ChaN, under the FatFs licence (a BSD-style licence, kept in the
 header of every FatFs file and quoted in `CREDITS.md`). The gbaSD changes
 and `exfat_repair` are GPL-3.0-or-later like the rest of gbaSD; the FatFs
 licence allows this, provided its notice is kept.
+
+## Known issue (planned fix)
+
+On FAT12/16/32 a power cut while a file with a long name is deleted or renamed can leave the file visible under its 8.3 alias (e.g. `ADIARY~1.TXT`): FatFs deletes the long-name entries before the short-name entry. exFAT is not affected. Plan: [plans/fat-lfn-alias-powercut.md](plans/fat-lfn-alias-powercut.md).
