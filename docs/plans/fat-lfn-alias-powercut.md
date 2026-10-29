@@ -1,6 +1,8 @@
 # Plan: FAT 8.3 alias left by a power cut during delete or rename
 
-Status: **planned, not implemented.** Found 2026-10-29 by gbawriter's FAT16
+Status: **implemented** (change 5 in [../fatfs.md](../fatfs.md),
+`GBASD_FF_FAT_REMOVE_ORDER_FIX`; test `tests/fatfs/remove_cut.py`). Point 3
+(a FAT counterpart of `exfat_repair`) is not done. Found 2026-10-29 by gbawriter's FAT16
 power-cut sweep (`tests/test_writer_fatfs.cpp` in gbawriter, counter
 `alias_left`). exFAT is not affected.
 
@@ -69,3 +71,20 @@ refuse ("RECOVERY: CHECK SD ON PC").
 Same as the FatFs move: new gbaSD version, then each app's submodule bump,
 all app tests on FAT and exFAT on all three cart models. gbawriter's sweep
 then turns `alias_left` from a counter into a must-be-zero check.
+
+## Outcome (implemented)
+
+- `dir_remove` on FAT marks the SFN entry (and the block's LFN entries in
+  its sector) deleted first, then the LFN entries in the sector(s) before;
+  FatFs's single window writes the SFN sector before it loads another one.
+  No extra `sync_window`: the same sector writes as R0.15 (a same-folder
+  rename sometimes one fewer, when the new and old SFN entries share a
+  sector), about 160 bytes of Thumb code, no RAM.
+- Rename: both paths (same folder, across folders) end in `dir_remove`, so
+  the fix covers them; `f_unlink` too. Nothing else calls `dir_remove`.
+  Still possible, as in R0.15 (FatFs's documented critical section): a cut
+  after the new entry and before the old one's deletion lists the file
+  under both names (shared clusters, both read the same data).
+- `tests/fatfs/remove_cut.py`: 0 aliases with the fix; with
+  `GBASD_FF_FAT_REMOVE_ORDER_FIX 0` it reports aliases on FAT12, FAT16 and
+  FAT32 (run.sh checks that it fails).

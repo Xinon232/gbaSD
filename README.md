@@ -68,7 +68,8 @@ retry, and puts the code in its own overlay sections; see
 ## FatFs
 
 `fatfs/` holds the FatFs R0.15 the apps share (ChaN's FatFs with the apps'
-exFAT power-cut fixes and a fix for FAT folder growth), the Butano apps'
+exFAT power-cut fixes and two FAT fixes: folder growth, and delete /
+rename of files with long names), the Butano apps'
 `diskio.c`, and `exfat_repair`, which repairs exFAT entry sets a power cut
 left half written. gbamp3's faster exFAT lookup, 32-bit file sizes and
 open-by-entry functions are switches in the app's `ffconf.h`, off by

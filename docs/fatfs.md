@@ -73,11 +73,55 @@ Every change carries a `gbaSD:` comment in `ff.c` / `ff.h`.
    -O2). exFAT keeps its own order (changes 1 and 2 cover it).
    `GBASD_FF_FAT_STRETCH_FIX 0` brings back R0.15's order; only the tests
    use it.
+5. **FAT12/16/32, `dir_remove`: the short-name entry is deleted on the card
+   before the long-name entries** (new in gbaSD;
+   `GBASD_FF_FAT_REMOVE_ORDER_FIX`, on). A file with a long name has its
+   long-name (LFN) entries and then its 8.3 short-name entry (SFN).
+   R0.15 marked them deleted in that order; when they cross a sector
+   boundary, the LFN sector was written first, and a power cut before the
+   SFN sector left the file visible under its 8.3 alias (`ADIARY~1.TXT`
+   for `A diary 13.07.2026.txt`): after an interrupted `f_unlink`, or
+   next to the renamed file after an interrupted `f_rename` (which
+   registers the new entry, then deletes the old one with `dir_remove`, in
+   the same folder and across folders alike). Found by gbawriter's FAT16
+   power-cut sweep (42 of 2,861 cuts). Now `dir_remove` marks the SFN entry
+   and the block's LFN entries in the SFN's sector first, then goes back to
+   the first LFN entry and marks the ones in the sector(s) before. FatFs
+   has a single window, so the SFN sector is written to the card (the
+   window flushed) before any other sector is loaded and changed. A cut can
+   now leave only orphaned LFN entries, which FatFs, mtools, Linux and
+   Windows skip; never a visible alias. Leftovers fsck.fat -n reports, all
+   harmless (a PC's fsck removes them):
+   - "Orphaned long file name part ..." / "A new long file name starts
+     within an old one.": LFN entries without their SFN entry (the old
+     file's, or, as in R0.15, a new block whose LFN sector reached the card
+     before its SFN sector);
+   - "Long filename fragment "..." found outside a LFN sequence. (Maybe the
+     start bit is missing on the last fragment)": the same for a block over
+     three sectors (a name of about 200 characters or more), cut after its
+     first LFN sector was written too;
+   - "Reclaimed N unused clusters": `f_unlink` cut after the entry was
+     deleted, before the file's clusters were freed (R0.15 order);
+   - "FATs differ but appear to be intact" and "Free cluster summary
+     wrong" (FAT32), as under change 4.
+   Unchanged from R0.15: `f_rename` cut after the new entry reached the card
+   and before the old one was deleted lists the file under both names, the
+   two entries sharing its clusters (FatFs calls it a critical section;
+   fsck.fat: "... and ... share clusters"). It reads the same under both
+   names. With change 5 a same-folder rename whose new and old SFN entries
+   are in one sector switches names in that one write.
+   Cost: no sector writes more than R0.15 (the same sectors, the SFN one
+   first; a same-folder rename sometimes one fewer), no RAM, about 160 bytes
+   of code (Thumb -O2). exFAT keeps R0.15's order (its entry sets are
+   checked by checksum; `exfat_repair` handles a torn one).
+   `GBASD_FF_FAT_REMOVE_ORDER_FIX 0` brings back R0.15's order; only the
+   tests use it.
 
 ### Switches (from gbamp3, off by default)
 
 Set in the app's `ffconf.h` (`ff.h` gives each the default when it is not
-set):
+set; the fixes' own switches, `GBASD_FF_FAT_STRETCH_FIX` and
+`GBASD_FF_FAT_REMOVE_ORDER_FIX`, default 1, are for the tests only):
 
 | Switch | Default | With 1 |
 |---|---|---|
@@ -96,12 +140,19 @@ compiler flags (Butano's `-O2 -mthumb`, gbamp3's `-O3 -marm -mlong-calls
 app's own `ff.c`, section by section (`objdump -dr` of every function, and
 the data):
 
-- switches off, `GBASD_FF_FAT_STRETCH_FIX 0`: identical to gbaplanner's,
+- switches off, `GBASD_FF_FAT_STRETCH_FIX 0` and
+  `GBASD_FF_FAT_REMOVE_ORDER_FIX 0`: identical to gbaplanner's,
   gbawriter's, gbavocab's and gbareader's FatFs;
-- switches on, `GBASD_FF_FAT_STRETCH_FIX 0`: identical to gbamp3's;
-- with the fix (the default): only `create_chain` (now `create_chain_ex`),
+- switches on, both fixes 0: identical to gbamp3's;
+- with the stretch fix: only `create_chain` (now `create_chain_ex`),
   `dir_next`, and the functions the compiler inlines them into or lays out
-  around them (`f_write`, `f_lseek`, `f_mkdir`, ...) differ.
+  around them (`f_write`, `f_lseek`, `f_mkdir`, ...) differ;
+- with both fixes (the default), against the stretch fix alone: only
+  `dir_remove` differs (gbamp3's flags: also `f_unlink` and `f_rename`,
+  which it is inlined into; host gcc: also the unwind table).
+
+An app that already uses gbaSD's FatFs is compared with its own copy as
+its git history holds it (the commit before its `ff.c` was deleted).
 
 It also checks that `ffunicode.c`, `ffsystem.c`, `diskio.h`, `diskio.c` and
 `ff.h` (switch blocks taken out) are the apps' text.
@@ -191,6 +242,22 @@ the switches off and on:
   block over two sectors can be left half written; `exfat_repair_dir` runs
   first, as in the apps. With `GBASD_FF_FAT_STRETCH_FIX 0` this test fails
   on every FAT type (`--unfixed`, run by run.sh).
+- `tests/fatfs/remove_cut.py`: delete and rename of files with long names
+  on FAT12, FAT16, FAT32 (512-byte and 1-4 KB clusters) and exFAT: a
+  22-character name (3 entries) and a 250-character name (21 entries, up to
+  three sectors) at every offset in a sector (0-15), in the root folder and
+  in a sub-folder; `f_unlink`, `f_rename` in the same folder and to another
+  folder; a cut after every sector write. After each cut mtools `mdir`
+  (FAT) or `exfat_read.py` (exFAT) and FatFs list the file under its old
+  name, its new name, or (rename, R0.15's critical section) both, never an
+  8.3 alias; the file reads back; fsck.fat / fsck.exfat may report only
+  the leftovers listed under change 5 (exFAT: as in growth_cut, and
+  `exfat_repair_dir` first); FatFs then creates, renames and deletes files
+  in both folders and fsck is checked again. With
+  `GBASD_FF_FAT_REMOVE_ORDER_FIX 0` it fails on every FAT type
+  (`--unfixed`, run by run.sh) with 8.3 aliases listed. exFAT runs as a
+  no-regression check (sub-folder only; with 512-byte clusters a 225-character
+  name, see the script).
 - `tests/exfat_kit/`: the exFAT card-tool kit's self-test (see its README).
 - `tests/fatfs/equivalence.py`: the comparison above (SKIP without the app
   checkouts).
@@ -202,6 +269,9 @@ header of every FatFs file and quoted in `CREDITS.md`). The gbaSD changes
 and `exfat_repair` are GPL-3.0-or-later like the rest of gbaSD; the FatFs
 licence allows this, provided its notice is kept.
 
-## Known issue (planned fix)
+## Fixed: 8.3 alias after a cut during delete / rename
 
-On FAT12/16/32 a power cut while a file with a long name is deleted or renamed can leave the file visible under its 8.3 alias (e.g. `ADIARY~1.TXT`): FatFs deletes the long-name entries before the short-name entry. exFAT is not affected. Plan: [plans/fat-lfn-alias-powercut.md](plans/fat-lfn-alias-powercut.md).
+On FAT12/16/32 a power cut while a file with a long name was deleted or
+renamed could leave the file visible under its 8.3 alias (e.g.
+`ADIARY~1.TXT`). Fixed by change 5; plan and background:
+[plans/fat-lfn-alias-powercut.md](plans/fat-lfn-alias-powercut.md).
