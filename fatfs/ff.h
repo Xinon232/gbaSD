@@ -48,6 +48,9 @@ extern "C" {
 #ifndef GBASD_FF_FAT_STRETCH_FIX
 #define GBASD_FF_FAT_STRETCH_FIX	1	/* 0 only in tests: FAT folder growth links the new cluster before clearing it (R0.15) */
 #endif
+#ifndef GBASD_FF_FAT_REMOVE_ORDER_FIX
+#define GBASD_FF_FAT_REMOVE_ORDER_FIX	1	/* 0 only in tests: FAT delete/rename marks the long-name entries deleted before the short-name entry (R0.15) */
+#endif
 
 
 /* Integer types used for FatFs API */

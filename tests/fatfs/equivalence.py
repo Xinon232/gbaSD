@@ -10,14 +10,20 @@ gbamp3) and also with the host gcc.
                           against the four Butano apps,
   gbaSD switches on       against gbamp3 (player/vendor/fatfs),
 
-each twice: with GBASD_FF_FAT_STRETCH_FIX 0 every function must be identical
-(the copies are the same code); with the fix on (the default) the functions
-that differ are listed (create_chain_ex / dir_next and what the compiler
-inlines them into or lays out differently around them); the behaviour of
-the fix is tested by tests/fatfs/run.sh, not here.
+each three times: with GBASD_FF_FAT_STRETCH_FIX 0 and
+GBASD_FF_FAT_REMOVE_ORDER_FIX 0 every function must be identical (the copies
+are the same code); with the stretch fix on, the functions that differ are
+listed (create_chain_ex / dir_next and what the compiler inlines them into or
+lays out differently around them); with both fixes on (the default), against
+the stretch fix alone, only dir_remove and the functions it is inlined into
+(REMOVE_FIX_FUNCTIONS: f_unlink, f_rename) may differ. The behaviour of the
+fixes is tested by tests/fatfs/run.sh, not here.
 The text of ffunicode.c, ffsystem.c, ff.h (switches off), diskio.h and
 diskio.c is compared too (line endings ignored).
 
+An app that already uses gbaSD's FatFs (its own ff.c deleted) is compared
+with its copy as it was before: the files are taken from the app's git
+history (the commit before the one that deleted its ff.c; read only).
 Needs the app checkouts (GBASD_APPS, default the parent folder of gbaSD) and
 arm-none-eabi-gcc (DEVKITARM or PATH). A local check: prints SKIP without
 them.   python3 tests/fatfs/equivalence.py"""
@@ -42,6 +48,8 @@ GBAMP3_FLAGS = ['-O3', '-std=c11', '-mcpu=arm7tdmi', '-marm', '-mthumb-interwork
                 '-fno-builtin', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-fwrapv',
                 '-fno-strict-aliasing', '-ffunction-sections', '-fdata-sections']
 HOST_FLAGS = ['-O2', '-ffunction-sections', '-fdata-sections']
+# dir_remove and what it is inlined into; host gcc: also the unwind table (it holds every function's size)
+REMOVE_FIX_FUNCTIONS = {'dir_remove', 'f_unlink', 'f_rename', 'data .eh_frame'}
 
 
 def text(p):
@@ -63,8 +71,10 @@ def functions(objdump, obj):
         m = re.match(r'Disassembly of section (\S+):', line)
         if m:
             cur = m.group(1); secs[cur] = []; continue
-        if cur:
-            secs[cur].append(line)
+        if cur:   # host gcc's .LCn constant labels: the numbering follows the order gcc emits them (their
+            # contents are compared with the data sections), and objdump's <.LCn+0x..> hints are not code
+            line = re.sub(r' <\.LC\d+(\+0x[0-9a-f]+)?>', '', line)
+            secs[cur].append(re.sub(r'\.LC\d+', '.LC', line))
     data = subprocess.run([objdump, '-s', str(obj)], capture_output=True, text=True, check=True).stdout
     for block in re.split(r'\nContents of section ', data)[1:]:
         name, _, body = block.partition(':\n')
@@ -78,15 +88,44 @@ def fname(sec):
 
 
 def compare(label, a, b, fix):
+    """fix 0: identical; 1: the stretch fix's differences; 'remove': a is the stretch-fix build,
+    b has the remove-order fix too: only REMOVE_FIX_FUNCTIONS differ (dir_remove among them)."""
     fa, fb = functions(OBJDUMP[a[1]], a[0]), functions(OBJDUMP[a[1]], b)
     diff = sorted(fname(k) for k in set(fa) | set(fb) if fa.get(k) != fb.get(k))
-    ok = 'create_chain_ex' in diff if fix else not diff
+    if fix == 'remove':
+        ok = bool(diff) and set(diff) <= REMOVE_FIX_FUNCTIONS
+    else:
+        ok = 'create_chain_ex' in diff if fix else not diff
     print(f'  {"OK  " if ok else "FAIL"} {label}: {len(fa)} sections, '
           + ('identical' if not diff else f'differ: {", ".join(diff)}'))
     return ok
 
 
+def old_copies(work):
+    """APPS, or a folder holding each app's FatFs files from before it moved to gbaSD's (from git)."""
+    out = work / 'apps'
+    for name, src, inc, _ in BUTANO_APPS + [GBAMP3]:
+        repo, ff = src.split('/', 1)[0], src + '/ff.c'
+        dst = out / repo
+        dst.mkdir(parents=True, exist_ok=True)
+        if (APPS / ff).exists():
+            for d in {src, inc}:
+                shutil.copytree(APPS / d, out / d, dirs_exist_ok=True)
+            continue
+        rel = ff.split('/', 1)[1]
+        git = ['git', '-C', str(APPS / repo)]
+        gone = subprocess.run(git + ['log', '-1', '--format=%H', '--', rel], capture_output=True, text=True).stdout.strip()
+        if not gone:
+            sys.exit(f'{name}: no {ff}, and none in its git history')
+        paths = sorted({src.split('/', 1)[1], inc.split('/', 1)[1]})
+        a = subprocess.run(git + ['archive', gone + '^', *paths], capture_output=True, check=True).stdout
+        subprocess.run(['tar', '-x', '-C', str(dst)], input=a, check=True)
+        print(f'  ({name}: its FatFs before {gone[:7]}, from git)')
+    return out
+
+
 def main():
+    global APPS
     if not ARM_GCC or not (APPS / 'gbaplanner').is_dir():
         print('SKIP: FatFs equivalence check needs the app checkouts (GBASD_APPS) and arm-none-eabi-gcc')
         return 0
@@ -95,6 +134,7 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='gbasd-ffeq-'))
     good = True
     try:
+        APPS = old_copies(work)
         print('Text of the unchanged files:')
         for name, src, inc, dio in BUTANO_APPS + [GBAMP3]:
             for f, where in (('ffunicode.c', src), ('ffsystem.c', src), ('diskio.h', inc), ('diskio.c', dio),
@@ -125,11 +165,17 @@ def main():
                 (conf / 'ffconf.h').write_text(c)
                 ref = work / f'{name}-{comp}-app.o'
                 compile_(cc, flags, APPS / src / 'ff.c', [inc], ref)
+                sw = 'switches on' if switches else 'switches off'
                 for fix in (0, 1):
                     o = work / f'{name}-{comp}-gbasd-{fix}.o'
-                    compile_(cc, flags, F / 'ff.c', [F, conf], o, [('GBASD_FF_FAT_STRETCH_FIX', fix)])
-                    what = ('switches on' if switches else 'switches off') + (', FAT stretch fix ' + ('on' if fix else 'off'))
+                    compile_(cc, flags, F / 'ff.c', [F, conf], o, [('GBASD_FF_FAT_STRETCH_FIX', fix),
+                                                                   ('GBASD_FF_FAT_REMOVE_ORDER_FIX', 0)])
+                    what = f'{sw}, FAT stretch fix {"on" if fix else "off"}, remove order fix off'
                     good &= compare(f'{name} vs gbaSD ({what})', (ref, comp), o, fix)
+                o = work / f'{name}-{comp}-gbasd-both.o'
+                compile_(cc, flags, F / 'ff.c', [F, conf], o)   # the defaults: both fixes on
+                good &= compare(f'gbaSD stretch fix vs both fixes (the default; {name}, {sw})',
+                                (work / f'{name}-{comp}-gbasd-1.o', comp), o, 'remove')
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print('FatFs equivalence ' + ('PASS' if good else 'FAIL'))

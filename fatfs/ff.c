@@ -2708,6 +2708,37 @@ static FRESULT dir_remove (	/* FR_OK:Succeeded, FR_DISK_ERR:A disk error */
 #if FF_USE_LFN		/* LFN configuration */
 	DWORD last = dp->dptr;
 
+#if GBASD_FF_FAT_REMOVE_ORDER_FIX
+	if (!FF_FS_EXFAT || fs->fs_type != FS_EXFAT) {
+		/* gbaSD: FAT12/16/32: the short-name entry is deleted on the card before the long-name entries are.
+		   R0.15 deleted the block in order (long-name entries first): a cut between the two sector writes of
+		   a block over a sector boundary left the file visible under its 8.3 alias. Now the SFN sector goes
+		   first (with the block's LFN entries in it), then the LFN entries in the sectors before it: a cut
+		   leaves only orphaned LFN entries, which every reader skips. Same sector writes as R0.15. */
+		DWORD top = (dp->blk_ofs == 0xFFFFFFFF) ? last : dp->blk_ofs;	/* First entry of the block */
+		DWORD sofs = last - last % SS(fs);	/* Offset of the SFN sector in the directory */
+		BYTE *d;
+
+		res = move_window(fs, dp->sect);	/* The SFN sector (dp->dir points at the SFN entry in it) */
+		if (res != FR_OK) return res;
+		for (d = dp->dir - (last - (top > sofs ? top : sofs)); d <= dp->dir; d += SZDIRE) {
+			d[DIR_Name] = DDEM;		/* The SFN entry and the block's LFN entries in its sector */
+		}
+		fs->wflag = 1;
+		if (top < sofs) {			/* LFN entries in the sector(s) before: the window holds one sector, so the */
+			res = dir_sdi(dp, top);	/* SFN sector is written (the window flushed) before another one is loaded */
+			while (res == FR_OK && dp->dptr < sofs) {
+				res = move_window(fs, dp->sect);
+				if (res != FR_OK) break;
+				dp->dir[DIR_Name] = DDEM;
+				fs->wflag = 1;
+				res = dir_next(dp, 0);
+			}
+			if (res == FR_NO_FILE) res = FR_INT_ERR;
+		}
+		return res;
+	}
+#endif
 	res = (dp->blk_ofs == 0xFFFFFFFF) ? FR_OK : dir_sdi(dp, dp->blk_ofs);	/* Goto top of the entry block if LFN is exist */
 	if (res == FR_OK) {
 		do {

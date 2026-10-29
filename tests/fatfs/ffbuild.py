@@ -6,7 +6,8 @@ switch configurations the tests run:
        GBASD_FF_FAST_EXFAT_LOOKUP, GBASD_FF_FSIZE32, GBASD_FF_OPEN_ENTRY 1.
 FF_USE_MKFS is turned on in the test builds (some tests format a RAM disk).
 A path to an ffconf.h instead of off / on tests that configuration (an
-app's include/ffconf.h: --config=PATH for stretch_cut.py and growth_cut.py)."""
+app's include/ffconf.h: --config=PATH for stretch_cut.py, growth_cut.py and
+remove_cut.py)."""
 from pathlib import Path
 import re, subprocess
 

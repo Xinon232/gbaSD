@@ -324,5 +324,8 @@
 /* GBASD_FF_FAT_STRETCH_FIX (default 1) is for tests only: 0 brings back
 /  R0.15's FAT folder growth (new cluster linked before it is cleared). */
 
+/* GBASD_FF_FAT_REMOVE_ORDER_FIX (default 1) is for tests only: 0 brings back
+/  R0.15's FAT delete order (long-name entries before the short-name entry). */
+
 
 /*--- End of configuration options ---*/
